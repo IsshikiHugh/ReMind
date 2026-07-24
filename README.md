@@ -96,40 +96,6 @@ order; a job goes to the highest-priority one that is actually advertising.
 A cold print is dominated by BLE: the scan cannot finish until the printer
 happens to broadcast, which costs seconds.
 
-### The connection is a session, in the TUI
-
-Those seconds are fine for a one-shot command and wrong for a tool you sit
-inside, so the TUI keeps a warm connection:
-
-- **Edit opens it, in parallel.** The cursor lands in the Content box
-  immediately and the scan+connect runs alongside it, so the printer is usually
-  ready by the time you finish the note and Print is near-instant. Editing
-  never waits on Bluetooth, and a printer that is off costs you nothing.
-- **Editing, typing and Print refresh a 5-minute idle timer.** The Printer
-  panel shows the remaining time next to a `●`.
-- **After 5 idle minutes it disconnects**, because holding a thermal printer
-  open drains it and stops anything else from pairing.
-- If the printer hangs up first (idle sleep, out of range), the session notices
-  and goes back to offline.
-
-Battery is a **live** reading, so it is shown only while connected; otherwise
-it reads `??` rather than a stale number from an earlier session. In the device
-list, only the printer actually connected shows a level.
-
-The CLI has none of this. It stays one-shot — connect, print, disconnect — so
-it is safe to call from scripts and cron without leaving a connection behind.
-
-Print settings (paper width, font size, margins, density) are stored **per
-device**, and the preview column renders at true proportions with the real
-renderer's line breaks, so what you see wraps the way the paper will.
-
-Chinese/Japanese/Korean works: the renderer looks for a system CJK font
-(PingFang, Hiragino, Noto CJK, WenQuanYi…), wraps between characters instead of
-on spaces, and keeps punctuation like `。，」` off the start of a line.
-
-The `config.toml` above is gitignored wherever it lands — it holds your
-device's address.
-
 ## Build a binary
 
 Nuitka compiles the Python to C and then to machine code:
