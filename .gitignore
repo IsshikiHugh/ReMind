@@ -1,0 +1,23 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Scratch / previews
+scratch_*.png
+
+# Build output (build on the platform you run on; never commit binaries)
+# dist/ is packaging/build.sh; build/ is left over from setuptools/PyInstaller
+build/
+dist/
+
+# Local state — registered devices (machine-specific, contains device UUID)
+config.toml
+
+# Local agent/editor tooling — personal workflow, not part of the project
+.claude/
+
+# Vendored upstream, kept locally while reverse-engineering the protocol.
+# Someone else's code (transcriptionstream/phomymo) — not ours to redistribute.
+reference/
