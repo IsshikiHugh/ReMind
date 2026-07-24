@@ -71,12 +71,15 @@ Notes/todo printer tool for Phomemo M02 thermal printer.
   只要文件固定在磁盘上，这笔开销就只付一次。**所以 Nuitka 若用 `--onefile` 会踩同一个坑**，必须用 app/standalone。
 - **最终选 Nuitka**（`packaging/build.sh`）：真编译成机器码，启动最快，代码也不再是可直接反解的字节码。代价是构建 5 分钟、体积 94MB。
 - **它不是"零依赖静态二进制"**：`remind` 可执行文件 64MB 是编译后的 Python 代码，但 libpython、PIL 的 `_imaging.so`、PyObjC 那些 `.so`/`.dylib` 仍然随包走（94MB 的大头是它们）。
-- **macOS 必须 `--mode=app`**：PyObjC 的 Foundation 不接受别的打包方式（Nuitka 直接 FATAL）。这反而是好事——bundle 自带 Info.plist，正好用 `--macos-app-protected-resource` 声明 `NSBluetoothAlwaysUsageDescription`。
+- **⚠️ 用 `--mode=app-dist`，不是 `--mode=app`（踩过）**：Nuitka 的 `app` 只在 **macOS** 上是 app bundle，**其他平台上它就是 onefile** ——也就是上面那张表里最慢的那一档。`build.sh` 原来写死 `--mode=app`，在 macOS 上没问题，但一放到 Linux CI 上就会悄悄产出 onefile 包。`app-dist` 才是想要的语义：**除 macOS 外一律 standalone，macOS 上仍然出 bundle**。macOS 必须要 bundle 是因为 PyObjC 的 Foundation 不接受别的打包方式（Nuitka 直接 FATAL）；这反而是好事——bundle 自带 Info.plist，正好用 `--macos-app-protected-resource` 声明 `NSBluetoothAlwaysUsageDescription`。
+- **Linux 产物结构**：standalone 出的是 `entry.dist/` 目录，`build.sh` 改名为 `dist/ReMind/`，同样软链 `dist/remind`，和 macOS 侧对称。
 - **入口不能叫 `remind.py`**：那会在编译时和 `remind` 包重名互相遮蔽，所以用 `packaging/entry.py`，构建完再把 `entry.app` 改名 `ReMind.app`，并软链 `dist/remind` 供 alias/PATH 用（软链跟着重建走）。
 - **config 路径必须先改，否则冻结后必坏**：原来是 `Path(__file__).parent.parent`（仓库根），打包后 `__file__` 指向 bundle/临时目录，onefile 下更是**退出即删**，注册信息全丢。现在按 `$REMIND_HOME` → 仓库根（仅源码树且已存在）→ `~/.config/remind/` 解析。**冻结检测要认两种**：PyInstaller 设 `sys.frozen`，Nuitka 设模块级 `__compiled__`。
 - **实测编译版里都正常**：`--help`、config 解析、真 BLE 扫描（PyObjC/CoreBluetooth 加载正常）、pty 里跑起 Textual TUI 并 `qq` 正常退出。
 - **Nuitka 4.1.3 对 Python 3.14 只是"实验性支持"**（构建时有 WARNING）。目前实测无问题，但升级 Python 或 Nuitka 后要重跑上面那套验证。
 - **不能交叉编译**：macOS 的在 macOS 上编，Linux 的在 Linux 上编。字体**不打包**——运行时按路径找系统字体。
+- **CI（`.github/workflows/build.yml`）**：因为不能交叉编译，四个目标各占一台 runner —— macOS arm64/x86_64 + Linux x86_64/arm64。push `v*` tag 建 release 并挂上 tar.gz；PR 只编 Linux x86_64 当"还编得过吗"的冒烟。**打 tar 不打 zip**：要保住 `dist/remind` 那个软链和可执行位。CI 用 Python 3.13 而非 3.14——3.14 在 Nuitka 这儿还是实验性支持，发布产物不适合当小白鼠。
+- **不做 Windows**：`render/fonts.py` 的候选表里没有任何 Windows 字体路径，中日韩会退回 Pillow 默认字体变空框；bleak 的 WinRT 后端也从没在这个项目上验过。要支持得先补这两块，不是加个 runner 的事。
 
 ## 连接会话（TUI 专有）
 

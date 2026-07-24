@@ -108,9 +108,13 @@ Nuitka compiles the Python to C and then to machine code:
 You get `dist/ReMind.app`, plus `dist/remind` symlinked to the executable
 inside it. The target machine needs no Python installed.
 
-Build on the platform you run on — there is no cross-compilation. The build
-must not become `--onefile`, and macOS needs `--mode=app`; both have reasons,
-kept in [CONTEXT.md](CONTEXT.md).
+Build on the platform you run on — there is no cross-compilation, which is why
+CI builds each target on its own runner: pushing a `v*` tag produces macOS
+(arm64, x86_64) and Linux (x86_64, arm64) archives and attaches them to a
+release. They are unsigned, so macOS quarantines them on first open.
+
+The build must not become `--onefile`, and macOS needs its app bundle; both
+have reasons, kept in [CONTEXT.md](CONTEXT.md).
 
 Fonts are deliberately not bundled: the renderer looks up system CJK fonts at
 runtime. Moving an unsigned build to another machine still trips Gatekeeper.

@@ -1,0 +1,150 @@
+name: Build binaries
+
+# Nuitka compiles to native machine code, so every target needs a runner of
+# that architecture — there is no cross-compilation. Pushing a v* tag builds
+# all of them and attaches the archives to a GitHub release; a pull request
+# builds only Linux x86_64, just to catch a build that no longer compiles.
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "remind/**"
+      - "packaging/**"
+      - "pyproject.toml"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The matrix is computed rather than written inline because it depends on the
+  # event, and the `matrix` context is not available in a job-level `if:`.
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - id: pick
+        run: |
+          all='{"include":[
+            {"target":"macos-arm64",   "runner":"macos-15"},
+            {"target":"macos-x86_64",  "runner":"macos-13"},
+            {"target":"linux-x86_64",  "runner":"ubuntu-24.04"},
+            {"target":"linux-arm64",   "runner":"ubuntu-24.04-arm"}
+          ]}'
+          smoke='{"include":[{"target":"linux-x86_64","runner":"ubuntu-24.04"}]}'
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            payload="$smoke"
+          else
+            payload="$all"
+          fi
+          echo "matrix=$(echo "$payload" | jq -c .)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: ${{ matrix.target }}
+    needs: plan
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Not the newest: Nuitka's support for the very latest CPython is
+          # marked experimental, and a release binary is the wrong place to
+          # find that out. Bump once Nuitka calls it stable.
+          python-version: "3.13"
+
+      # patchelf is what Nuitka uses to fix rpaths in a standalone build;
+      # ccache makes a warm rebuild much cheaper on both platforms.
+      - name: Install toolchain (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache patchelf
+
+      - name: Install toolchain (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ccache
+
+      # Both cache roots are listed; whichever does not exist on this runner
+      # is simply skipped.
+      - name: Cache Nuitka + ccache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/Nuitka
+            ~/.cache/ccache
+            ~/Library/Caches/Nuitka
+            ~/Library/Caches/ccache
+          key: nuitka-${{ matrix.target }}-${{ hashFiles('pyproject.toml') }}-${{ github.sha }}
+          restore-keys: |
+            nuitka-${{ matrix.target }}-${{ hashFiles('pyproject.toml') }}-
+            nuitka-${{ matrix.target }}-
+
+      - name: Install ReMind and build deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      # build.sh ends with `remind --help`, so a binary that cannot even start
+      # fails the job here rather than in someone's download.
+      - name: Build
+        run: ./packaging/build.sh
+        env:
+          PYTHON: python
+
+      - name: Name the archive
+        id: name
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')-$(git rev-parse --short HEAD)"
+          fi
+          echo "archive=remind-${version}-${{ matrix.target }}.tar.gz" >> "$GITHUB_OUTPUT"
+
+      # tar, not zip: it keeps the `remind` symlink and the executable bits,
+      # which upload-artifact's own zipping would flatten.
+      - name: Package
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            tar -czf "${{ steps.name.outputs.archive }}" -C dist ReMind.app remind
+          else
+            tar -czf "${{ steps.name.outputs.archive }}" -C dist ReMind remind
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.name.outputs.archive }}
+          path: ${{ steps.name.outputs.archive }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --notes "Unsigned builds. macOS quarantines them on first run — \`xattr -dr com.apple.quarantine ReMind.app\`, or right-click → Open." \
+            artifacts/*.tar.gz
